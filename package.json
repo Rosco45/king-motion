@@ -1,0 +1,14 @@
+{
+  "name": "king-motion",
+  "version": "1.0.0",
+  "description": "Site vitrine royal - Animation Motion Design liquide pour KING avec couronne dorée",
+  "private": true,
+  "scripts": {
+    "dev": "vite",
+    "serve": "npx serve .",
+    "start": "python3 -m http.server 3000"
+  },
+  "devDependencies": {
+    "vite": "^8.3.0"
+  }
+}
