@@ -4,7 +4,7 @@
  * interactive canvas liquid particles, 3D tilt, and Web Audio API synthesis.
  */
 
-document.addEventListener('DOMContentLoaded', () => {
+function initKingMotion() {
   // =========================================================================
   // 1. STATE & REFERENCES
   // =========================================================================
@@ -20,12 +20,19 @@ document.addEventListener('DOMContentLoaded', () => {
     shockwave: 0
   };
 
+  // Animation Timers / Frames for clean replay cancellation
+  let dropTimeout = null;
+  let streamTimeout = null;
+  let crownAnimId = null;
+  let textAnimId = null;
+
   // DOM Elements
   const canvas = document.getElementById('fluid-canvas');
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const logoWrapper = document.getElementById('logo-wrapper');
   const dropContainer = document.getElementById('drop-container');
-  const liquidDrop = dropContainer.querySelector('.liquid-drop');
+  const liquidDrop = dropContainer ? dropContainer.querySelector('.liquid-drop') : null;
   
   // SVG Elements
   const crownContour = document.getElementById('crown-contour');
@@ -39,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const feDispMap = document.getElementById('fe-disp');
 
   // Controls
+  const controlsPanel = document.querySelector('.controls-panel');
   const btnReplay = document.getElementById('btn-replay');
   const btnSound = document.getElementById('btn-sound');
   const btnSplash = document.getElementById('btn-splash');
@@ -46,6 +54,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const iconSoundOn = document.getElementById('icon-sound-on');
   const soundLabel = document.getElementById('sound-label');
   const chips = document.querySelectorAll('.chip');
+
+  // Stop click events on controls panel from bubbling to window
+  if (controlsPanel) {
+    controlsPanel.addEventListener('click', (e) => e.stopPropagation());
+    controlsPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
+    controlsPanel.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+  }
 
   // =========================================================================
   // 2. CANVAS FLUID PARTICLES & RIPPLES SYSTEM
@@ -169,93 +184,96 @@ document.addEventListener('DOMContentLoaded', () => {
   // 3. SYNTHESIZED WEB AUDIO API (Harmonics & Liquid Drops)
   // =========================================================================
   function initAudio() {
-    if (!state.audioCtx) {
-      const AudioContext = window.AudioContext || window.webkitAudioContext;
-      state.audioCtx = new AudioContext();
-    }
-    if (state.audioCtx.state === 'suspended') {
-      state.audioCtx.resume();
+    try {
+      if (!state.audioCtx) {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          state.audioCtx = new AudioContext();
+        }
+      }
+      if (state.audioCtx && state.audioCtx.state === 'suspended') {
+        state.audioCtx.resume();
+      }
+    } catch (e) {
+      console.warn('Web Audio init skipped:', e);
     }
   }
 
   function playDropSound(freq = 640) {
     if (!state.soundEnabled) return;
-    initAudio();
-    const ctx = state.audioCtx;
-    const now = ctx.currentTime;
+    try {
+      initAudio();
+      if (!state.audioCtx) return;
+      const ctx = state.audioCtx;
+      const now = ctx.currentTime;
 
-    // Water droplet "plop": rapid pitch swoop up then down
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
 
-    osc.type = 'sine';
-    osc.frequency.setValueAtTime(freq * 0.7, now);
-    osc.frequency.exponentialRampToValueAtTime(freq * 1.6, now + 0.06);
-    osc.frequency.exponentialRampToValueAtTime(freq * 0.8, now + 0.18);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq * 0.7, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 1.6, now + 0.06);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.8, now + 0.18);
 
-    gain.gain.setValueAtTime(0.01, now);
-    gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+      gain.gain.setValueAtTime(0.01, now);
+      gain.gain.linearRampToValueAtTime(0.25, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
 
-    osc.connect(gain);
-    gain.connect(ctx.destination);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
 
-    osc.start(now);
-    osc.stop(now + 0.3);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } catch (e) {
+      // Audio autoplay policy catch
+    }
   }
 
   function playRoyalChord() {
     if (!state.soundEnabled) return;
-    initAudio();
-    const ctx = state.audioCtx;
-    const now = ctx.currentTime;
+    try {
+      initAudio();
+      if (!state.audioCtx) return;
+      const ctx = state.audioCtx;
+      const now = ctx.currentTime;
 
-    // Royal harmonic chime: warm major chords (D, F#, A, D)
-    const freqs = [146.83, 220.00, 293.66, 440.00, 587.33];
-    freqs.forEach((f, index) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
+      const freqs = [146.83, 220.00, 293.66, 440.00, 587.33];
+      freqs.forEach((f, index) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        const filter = ctx.createBiquadFilter();
 
-      filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(1200, now);
+        filter.type = 'lowpass';
+        filter.frequency.setValueAtTime(1200, now);
 
-      osc.type = index % 2 === 0 ? 'sine' : 'triangle';
-      osc.frequency.setValueAtTime(f, now);
+        osc.type = index % 2 === 0 ? 'sine' : 'triangle';
+        osc.frequency.setValueAtTime(f, now);
 
-      const delay = index * 0.04;
-      gain.gain.setValueAtTime(0.001, now + delay);
-      gain.gain.linearRampToValueAtTime(0.12 / freqs.length, now + delay + 0.4);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 3.2);
+        const delay = index * 0.04;
+        gain.gain.setValueAtTime(0.001, now + delay);
+        gain.gain.linearRampToValueAtTime(0.12 / freqs.length, now + delay + 0.4);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + delay + 3.2);
 
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(ctx.destination);
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(ctx.destination);
 
-      osc.start(now + delay);
-      osc.stop(now + delay + 3.4);
-    });
+        osc.start(now + delay);
+        osc.stop(now + delay + 3.4);
+      });
+    } catch (e) {
+      // Audio autoplay policy catch
+    }
   }
 
   // =========================================================================
   // 4. LIQUID WAVE GENERATOR FOR SVG CLIPPING
   // =========================================================================
-  /**
-   * Generates a sinusoidal fluid wave path at a given fill progress (0 to 1).
-   * @param {number} progress - 0 (empty) to 1 (full)
-   * @param {number} topY - target top limit of shape in SVG coords
-   * @param {number} botY - target bottom limit of shape in SVG coords
-   * @param {number} time - frame time
-   * @param {number} amplitude - height of liquid waves
-   * @param {number} frequency - wave frequency
-   */
   function createLiquidWavePath(progress, topY, botY, time, amplitude = 12, frequency = 0.015) {
     if (progress <= 0.001) {
-      // Empty clip: a zero-height line at the bottom
       return `M 0,${botY + 10} L 1000,${botY + 10} L 1000,${botY + 20} L 0,${botY + 20} Z`;
     }
     if (progress >= 0.999) {
-      // Fully filled clip: covering entire bounding box
       return `M 0,0 L 1000,0 L 1000,680 L 0,680 Z`;
     }
 
@@ -263,7 +281,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const wavePoints = [];
     const step = 25;
 
-    // Generate sinusoidal wavy surface
     for (let x = 0; x <= 1000; x += step) {
       const yOffset = 
         Math.sin(x * frequency + time * 3) * amplitude * (1 - progress * 0.4) +
@@ -278,38 +295,47 @@ document.addEventListener('DOMContentLoaded', () => {
   // 5. MOTION DESIGN TIMELINE (POUR, REVEAL, FILL)
   // =========================================================================
   function runLiquidRevealSequence() {
-    if (state.isAnimating) return;
+    // Cancel any previous in-flight timeouts & animation loops
+    if (dropTimeout) clearTimeout(dropTimeout);
+    if (streamTimeout) clearTimeout(streamTimeout);
+    if (crownAnimId) cancelAnimationFrame(crownAnimId);
+    if (textAnimId) cancelAnimationFrame(textAnimId);
+
     state.isAnimating = true;
 
     // Reset visual elements
     state.crownLevel = 0;
     state.textLevel = 0;
-    crownContour.classList.remove('drawn');
-    crownFiligree.classList.remove('drawn');
-    textContour.classList.remove('drawn');
+    if (crownContour) crownContour.classList.remove('drawn');
+    if (crownFiligree) crownFiligree.classList.remove('drawn');
+    if (textContour) textContour.classList.remove('drawn');
     streams.forEach(s => s.classList.remove('flowing'));
     drips.forEach(d => d.classList.remove('dripping'));
 
-    // Reset drop
-    liquidDrop.classList.remove('falling');
-    void liquidDrop.offsetWidth; // trigger reflow
-    liquidDrop.classList.add('falling');
+    // Trigger drop animation
+    if (liquidDrop) {
+      liquidDrop.classList.remove('falling');
+      void liquidDrop.offsetWidth; // trigger reflow
+      liquidDrop.classList.add('falling');
+    }
 
     // 1. Drop impact after 1.25s
-    setTimeout(() => {
+    dropTimeout = setTimeout(() => {
       playDropSound(780);
       playRoyalChord();
 
-      // Spawn splash at crown top center (approx coordinates)
-      const rect = logoWrapper.getBoundingClientRect();
-      const crownTopX = rect.left + rect.width / 2;
-      const crownTopY = rect.top + rect.height * 0.08;
-      spawnSplash(crownTopX, crownTopY, 28);
+      // Spawn splash at crown top center
+      if (logoWrapper) {
+        const rect = logoWrapper.getBoundingClientRect();
+        const crownTopX = rect.left + rect.width / 2;
+        const crownTopY = rect.top + rect.height * 0.08;
+        spawnSplash(crownTopX, crownTopY, 28);
+      }
       triggerShockwave(25);
 
       // 2. Crown contour outline draws
-      crownContour.classList.add('drawn');
-      crownFiligree.classList.add('drawn');
+      if (crownContour) crownContour.classList.add('drawn');
+      if (crownFiligree) crownFiligree.classList.add('drawn');
 
       // 3. Liquid rises in Crown from 0 to 1 over 1.6s
       const startTime = performance.now();
@@ -318,47 +344,44 @@ document.addEventListener('DOMContentLoaded', () => {
       function fillCrown(now) {
         const elapsed = now - startTime;
         const p = Math.min(1, elapsed / fillCrownDuration);
-        // Smooth easing: easeOutCubic
         state.crownLevel = 1 - Math.pow(1 - p, 3);
 
         if (p < 1) {
-          requestAnimationFrame(fillCrown);
+          crownAnimId = requestAnimationFrame(fillCrown);
         } else {
           state.crownLevel = 1;
           onCrownFilled();
         }
       }
-      requestAnimationFrame(fillCrown);
+      crownAnimId = requestAnimationFrame(fillCrown);
 
     }, 1250);
 
     function onCrownFilled() {
       // 4. Cascade streams flow down to KING
       streams.forEach(s => s.classList.add('flowing'));
-      textContour.classList.add('drawn');
+      if (textContour) textContour.classList.add('drawn');
 
-      // Sound accent
       playDropSound(520);
 
-      // 5. Liquid rises in KING text after a brief stream delay
-      setTimeout(() => {
+      // 5. Liquid rises in KING text
+      streamTimeout = setTimeout(() => {
         const textStartTime = performance.now();
         const fillTextDuration = 2000;
 
         function fillText(now) {
           const elapsed = now - textStartTime;
           const p = Math.min(1, elapsed / fillTextDuration);
-          // Easing: easeOutQuart for majestic viscosity
           state.textLevel = 1 - Math.pow(1 - p, 4);
 
           if (p < 1) {
-            requestAnimationFrame(fillText);
+            textAnimId = requestAnimationFrame(fillText);
           } else {
             state.textLevel = 1;
             onTextFilled();
           }
         }
-        requestAnimationFrame(fillText);
+        textAnimId = requestAnimationFrame(fillText);
       }, 500);
     }
 
@@ -401,17 +424,19 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- B. Update SVG Liquid Wave Clipping Paths ---
-    // Crown wave bounds: topY = 20, botY = 280
-    crownWavePath.setAttribute(
-      'd',
-      createLiquidWavePath(state.crownLevel, 20, 280, state.time, 14, 0.02)
-    );
+    if (crownWavePath) {
+      crownWavePath.setAttribute(
+        'd',
+        createLiquidWavePath(state.crownLevel, 20, 280, state.time, 14, 0.02)
+      );
+    }
 
-    // Text wave bounds: topY = 360, botY = 560
-    textWavePath.setAttribute(
-      'd',
-      createLiquidWavePath(state.textLevel, 360, 560, state.time, 18, 0.012)
-    );
+    if (textWavePath) {
+      textWavePath.setAttribute(
+        'd',
+        createLiquidWavePath(state.textLevel, 360, 560, state.time, 18, 0.012)
+      );
+    }
 
     // --- C. Dynamic SVG Turbulence Filter breathing ---
     if (feTurbulence) {
@@ -426,19 +451,21 @@ document.addEventListener('DOMContentLoaded', () => {
       const currentScale = baseScale + state.shockwave;
       feDispMap.setAttribute('scale', currentScale.toFixed(1));
       if (state.shockwave > 0.05) {
-        state.shockwave *= 0.92; // exponential damping
+        state.shockwave *= 0.92;
       } else {
         state.shockwave = 0;
       }
     }
 
     // --- E. 3D Tilt of Logo on Mouse Move ---
-    state.mouse.targetX += (state.mouse.x - state.mouse.targetX) * 0.06;
-    state.mouse.targetY += (state.mouse.y - state.mouse.targetY) * 0.06;
+    if (logoWrapper) {
+      state.mouse.targetX += (state.mouse.x - state.mouse.targetX) * 0.06;
+      state.mouse.targetY += (state.mouse.y - state.mouse.targetY) * 0.06;
 
-    const rotY = ((state.mouse.targetX / width) - 0.5) * 16;
-    const rotX = -((state.mouse.targetY / height) - 0.5) * 14;
-    logoWrapper.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+      const rotY = ((state.mouse.targetX / width) - 0.5) * 16;
+      const rotX = -((state.mouse.targetY / height) - 0.5) * 14;
+      logoWrapper.style.transform = `perspective(1000px) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+    }
 
     requestAnimationFrame(render);
   }
@@ -454,14 +481,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Mouse & Touch Tracking
   function handlePointerMove(e) {
-    const x = e.clientX || (e.touches && e.touches[0].clientX);
-    const y = e.clientY || (e.touches && e.touches[0].clientY);
+    const x = e.clientX || (e.touches && e.touches[0] && e.touches[0].clientX);
+    const y = e.clientY || (e.touches && e.touches[0] && e.touches[0].clientY);
     if (x === undefined || y === undefined) return;
 
     state.mouse.x = x;
     state.mouse.y = y;
 
-    // Emit subtle micro-ripple every few pixels
     if (Math.random() < 0.12) {
       ripples.push(new Ripple(x, y, 45));
     }
@@ -470,51 +496,83 @@ document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('mousemove', handlePointerMove, { passive: true });
   window.addEventListener('touchmove', handlePointerMove, { passive: true });
 
-  // Click on stage / logo to trigger liquid shockwave
+  // Click on stage / background to trigger liquid shockwave
   window.addEventListener('click', (e) => {
     // Avoid triggering if clicking controls panel buttons
-    if (e.target.closest('.controls-panel')) return;
+    if (e.target.closest && e.target.closest('.controls-panel')) return;
 
     spawnSplash(e.clientX, e.clientY, 18);
     triggerShockwave(22);
     playDropSound(600 + Math.random() * 300);
   });
 
-  // Replay Button
-  btnReplay.addEventListener('click', () => {
-    runLiquidRevealSequence();
-  });
+  // Replay Button (Always active, cancel and restart)
+  if (btnReplay) {
+    const handleReplay = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      runLiquidRevealSequence();
+    };
+    btnReplay.addEventListener('click', handleReplay);
+    btnReplay.addEventListener('pointerdown', (e) => e.stopPropagation());
+  }
 
   // Splash Button (Vague d'Or)
-  btnSplash.addEventListener('click', (e) => {
-    const rect = logoWrapper.getBoundingClientRect();
-    const cx = rect.left + rect.width / 2;
-    const cy = rect.top + rect.height / 2;
-    spawnSplash(cx, cy, 35);
-    triggerShockwave(35);
-    playDropSound(750);
-  });
+  if (btnSplash) {
+    const handleSplash = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      if (logoWrapper) {
+        const rect = logoWrapper.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        spawnSplash(cx, cy, 35);
+      } else {
+        spawnSplash(width / 2, height / 2, 35);
+      }
+      triggerShockwave(35);
+      playDropSound(750);
+    };
+    btnSplash.addEventListener('click', handleSplash);
+    btnSplash.addEventListener('pointerdown', (e) => e.stopPropagation());
+  }
 
   // Sound Button Toggle
-  btnSound.addEventListener('click', () => {
-    state.soundEnabled = !state.soundEnabled;
-    if (state.soundEnabled) {
-      initAudio();
-      iconSoundOff.classList.add('hidden');
-      iconSoundOn.classList.remove('hidden');
-      soundLabel.textContent = 'Son: Actif';
-      playDropSound(700);
-      playRoyalChord();
-    } else {
-      iconSoundOff.classList.remove('hidden');
-      iconSoundOn.classList.add('hidden');
-      soundLabel.textContent = 'Son: Muet';
-    }
-  });
+  if (btnSound) {
+    const handleSoundToggle = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      state.soundEnabled = !state.soundEnabled;
+      if (state.soundEnabled) {
+        initAudio();
+        if (iconSoundOff) iconSoundOff.classList.add('hidden');
+        if (iconSoundOn) iconSoundOn.classList.remove('hidden');
+        if (soundLabel) soundLabel.textContent = 'Son: Actif';
+        playDropSound(700);
+        playRoyalChord();
+      } else {
+        if (iconSoundOff) iconSoundOff.classList.remove('hidden');
+        if (iconSoundOn) iconSoundOn.classList.add('hidden');
+        if (soundLabel) soundLabel.textContent = 'Son: Muet';
+      }
+    };
+    btnSound.addEventListener('click', handleSoundToggle);
+    btnSound.addEventListener('pointerdown', (e) => e.stopPropagation());
+  }
 
   // Style Mode Selector
   chips.forEach(chip => {
-    chip.addEventListener('click', () => {
+    const handleChipSelect = (e) => {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
       chips.forEach(c => c.classList.remove('active'));
       chip.classList.add('active');
 
@@ -529,13 +587,14 @@ document.addEventListener('DOMContentLoaded', () => {
         document.body.classList.add('mode-imperial');
         updateGradients('#FEF9C3', '#FDE047', '#EAB308', '#CA8A04', '#854D0E');
       } else {
-        // molten 24k
         updateGradients('#FFF8D6', '#FCE182', '#F59E0B', '#D97706', '#78350F');
       }
 
       triggerShockwave(20);
       playDropSound(640);
-    });
+    };
+    chip.addEventListener('click', handleChipSelect);
+    chip.addEventListener('pointerdown', (e) => e.stopPropagation());
   });
 
   function updateGradients(c0, c1, c2, c3, c4) {
@@ -550,4 +609,11 @@ document.addEventListener('DOMContentLoaded', () => {
       stops[4].setAttribute('stop-color', c4);
     }
   }
-});
+}
+
+// Guaranteed launch: executes even if DOMContentLoaded already fired (Vercel CDN / caching)
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initKingMotion);
+} else {
+  initKingMotion();
+}
