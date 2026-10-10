@@ -1,15 +1,16 @@
 {
   "name": "king-motion",
   "version": "1.0.0",
+  "type": "module",
   "description": "Site vitrine royal - Animation Motion Design liquide pour KING avec couronne dorée",
   "private": true,
   "scripts": {
-    "build": "echo 'Build OK'",
     "dev": "vite",
-    "serve": "npx serve .",
-    "start": "python3 -m http.server 3000"
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "vite"
   },
   "devDependencies": {
-    "vite": "^8.3.0"
+    "vite": "^8.3.4"
   }
 }
